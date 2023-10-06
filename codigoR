@@ -1,0 +1,121 @@
+# Instalar paquetes
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("tidyverse")
+
+# Cargar librerías
+library(dplyr)
+library(zoo)
+library(ggplot2)
+library(tidyverse)
+
+# Establecer el directorio de trabajo
+wd <- "pega la ruta de tu directorio"
+setwd(wd)
+
+# Leer datos
+encabezado <- read.csv("pega el nombre de tu archivo.extension", nrows = 15, header = FALSE)
+data <- read.csv("pega el nombre de tu archivo.extension", skip = 15, header = FALSE, na.strings = -9999)
+fechas <- as.Date(data[, 1])
+datos <- data[, -1]
+
+# Crear serie temporal
+serie_inicial <- zoo(datos, fechas)
+colnames(serie_inicial) <- encabezado[1, -1]
+serie_recortada <- window(serie_inicial, start = as.Date("2000-01-01"), end = as.Date("2020-12-31"))
+
+# Filtrar por sub_cuenca
+sub_cuenca <- "escribe la subcuenca"
+indice <- encabezado[11, -1] == sub_cuenca
+codigos_estaciones <- as.character(encabezado[1, -1])[indice]
+serie_filtrada_sub <- serie_recortada[, codigos_estaciones]
+
+# Eliminar estaciones con datos faltantes
+no_na <- !is.na(serie_filtrada_sub)
+seleccion <- apply(no_na, MARGIN = 2, FUN = sum) == 0
+serie_limpia_sub <- serie_filtrada_sub[, !seleccion]
+
+# Calcular la cantidad de días con lluvia
+dias_con_lluvia <- apply(serie_limpia_sub, MARGIN = 1, FUN = function(x) sum(x > 0))
+
+# Calcular el total de días en la serie temporal
+total_dias <- length(dias_con_lluvia)
+
+# Calcular el porcentaje de días con lluvia
+porcentaje_lluvia <- (total_dias / length(serie_limpia_sub)) * 100
+cat("Porcentaje de días con lluvia:", porcentaje_lluvia, "%\n")
+
+# Encontrar el valor máximo de precipitación diaria para cada estación y su fecha correspondiente
+max_precipitacion <- apply(serie_limpia_sub, 2, function(x) max(x, na.rm = TRUE))
+dias_max_precipitacion <- apply(serie_limpia_sub, 2, function(x) which.max(x))
+fechas_max_precipitacion <- index(serie_limpia_sub)[dias_max_precipitacion]
+
+# Crear un data frame con los resultados
+resultados <- data.frame(Estacion = names(max_precipitacion),
+                         MaxPrecipitacion = max_precipitacion,
+                         FechaMaxPrecipitacion = fechas_max_precipitacion)
+
+print(resultados)
+
+# Crear gráficos diarios para cada estación
+plots_diarios <- lapply(1:ncol(serie_limpia_sub), function(i) {
+  estacion <- names(serie_limpia_sub)[i]
+  
+  ggplot(data = data.frame(Fecha = index(serie_limpia_sub), Precipitacion = serie_limpia_sub[, i]), 
+         aes(x = Fecha, y = Precipitacion)) +
+    geom_line() +
+    labs(title = paste("Estación:", estacion),
+         x = "Fecha", y = "Precipitación diaria (mm)") +
+    theme_minimal() +
+    geom_text(aes(x = max(index(serie_limpia_sub)), y = max(serie_limpia_sub[, i], na.rm = TRUE),
+                  label = paste(round(sum(!is.na(serie_limpia_sub[, i])) / length(serie_limpia_sub[, i]) * 100, 2), "% datos disponibles")),
+              hjust = 1, vjust = 1)
+})
+
+print(plots_diarios)
+
+# Convertir las fechas en años
+anios <- as.numeric(format(index(serie_limpia_sub), "%Y"))
+
+# Calcular el promedio anual para cada estación
+promedios_anuales <- aggregate(serie_limpia_sub, by = list(Año = anios), FUN = mean, na.rm = TRUE)
+no_nan <- !is.nan(promedios_anuales)
+seleccion <- apply(no_nan, MARGIN = 2, FUN = sum) == 0
+serie_limpia_sub_prom_anual <- promedios_anuales[, !seleccion]
+
+# Crear gráficos anuales para cada estación
+num_estaciones <- ncol(serie_limpia_sub_prom_anual)
+graficos_estaciones <- lapply(1:num_estaciones, function(estacion) {
+  datos_estacion <- serie_limpia_sub_prom_anual[, estacion]
+  
+  plot(datos_estacion, 
+       main = paste("Estación:", names(serie_limpia_sub_prom_anual)[estacion]),
+       xlab = "Año", ylab = "Promedio Anual (mm)")
+})
+
+print(graficos_estaciones)
+
+# Calcular valores medios, mediana, percentil 25 y 75, y rango para cada serie anual
+estadisticas <- lapply(1:num_estaciones, function(estacion) {
+  datos_estacion <- serie_limpia_sub_prom_anual[, estacion]
+  media <- mean(datos_estacion, na.rm = TRUE)
+  mediana <- median(datos_estacion, na.rm = TRUE)
+  percentil_25 <- quantile(datos_estacion, 0.25, na.rm = TRUE)
+  percentil_75 <- quantile(datos_estacion, 0.75, na.rm = TRUE)
+  rango <- max(datos_estacion, na.rm = TRUE) - min(datos_estacion, na.rm = TRUE)
+  c(Media = media, Mediana = mediana, Percentil25 = percentil_25, Percentil75 = percentil_75, Rango = rango)
+})
+
+estadisticas_df <- do.call(rbind, estadisticas)
+rownames(estadisticas_df) <- names(serie_limpia_sub_prom_anual)
+
+print(estadisticas_df)
+
+# Crear boxplots para cada serie anual
+boxplots <- lapply(1:num_estaciones, function(estacion) {
+  datos_estacion <- serie_limpia_sub_prom_anual[, estacion]
+  boxplot(datos_estacion, main = paste("Estación:", names(serie_limpia_sub_prom_anual)[estacion]),
+          ylab = "Precipitación (mm)", col = "lightblue", border = "black")
+})
+
+print(boxplots)
